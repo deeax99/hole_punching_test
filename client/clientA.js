@@ -1,117 +1,44 @@
 #!/usr/bin/env node
-var readline = require('readline');
-var rl = readline.createInterface({
-	input: process.stdin,
-	output: process.stdout
-});
+var dgram = require('dgram');
 
 // based on http://www.bford.info/pub/net/p2pnat/index.html
 
-var addressOfS = '35.174.114.203'; // replace this with the IP of the server running publicserver.js
-var portOfS = 9999;
-
-var socketToS;
-var tunnelEstablished = false;
-
-function connectToS () {
-	console.log('> (A->S) connecting to S');
-
-	socketToS = require('net').createConnection({host : addressOfS, port : portOfS}, function () {
-		console.log('> (A->S) connected to S via', socketToS.localAddress, socketToS.localPort);
 
 
-		// letting local address and port know to S so it can be can be sent to client B:
-	   	socketToS.write(JSON.stringify({
-	   		name: 'A',
-	   		localAddress: socketToS.localAddress,
-	   		localPort: socketToS.localPort
-	   	}));
-	});
+var socket = dgram.createSocket('udp4');
 
-	socketToS.on('data', function (data) {
-		console.log('> (A->S) response from S:', data.toString());
+socket.on('message', function (message, remote) {
+    console.log(remote.address + ':' + remote.port +' - ' + message);
+    try{
+    	var publicEndpointB = JSON.parse(message);
+    	sendMessageToB(publicEndpointB.address, publicEndpointB.port);
+    }catch(err) {}
+});
 
-		var connectionDetails = JSON.parse(data.toString());
-		if(connectionDetails.name == 'A') {
-			// own connection details, only used to display the connection to the server in console:
-			console.log("");
-			console.log('> (A)', socketToS.localAddress + ':' + socketToS.localPort, '===> (NAT of A)', connectionDetails.remoteAddress + ':' + connectionDetails.remotePort, '===> (S)', socketToS.remoteAddress + ':' + socketToS.remotePort);
-			console.log("");
-		}
+function sendMessageToS () {
+	var serverPort = 33333;
+	var serverHost = '35.174.114.203';
 
-
-		if(connectionDetails.name == 'B') {
-			console.log('> (A) time to listen on port used to connect to S ('+socketToS.localPort+')');
-	    	listen(socketToS.localAddress, socketToS.localPort);
-
-			// try connecting to B directly:
-			connectTo(connectionDetails.remoteAddress, connectionDetails.remotePort);
-		}
-	});
-
-	socketToS.on('end', function () {
-	    console.log('> (A->S) connection closed.');
-	});
-
-	socketToS.on('error', function (err) {
-	    console.log('> (A->S) connection closed with err:', err.code);
+	var message = new Buffer('A');
+	socket.send(message, 0, message.length, serverPort, serverHost, function (err, nrOfBytesSent) {
+	    if (err) return console.log(err);
+	    console.log('UDP message sent to ' + serverHost +':'+ serverPort);
+	    // socket.close();
 	});
 }
 
-connectToS();
+sendMessageToS();
 
+var counter = 0;
+function sendMessageToB (address, port) {
+	if(counter == 5) return;
+	var message = new Buffer(counter++ + ': Hello B!');
+	socket.send(message, 0, message.length, port, address, function (err, nrOfBytesSent) {
+	    if (err) return console.log(err);
+	    console.log('UDP message sent to B:', address +':'+ port);
 
-function connectTo (ip, port) {
-	if(tunnelEstablished) return;
-
-	console.log('> (A->B) connecting to B: ===> (B)', ip + ":" + port);
-	var c = require('net').createConnection({host : ip, port : port}, function () {
-		console.log('> (A->B) Connected to B via', ip + ":" + port);
-		tunnelEstablished = true;
-	});
-
-	c.on('data', function (data) {
-	    console.log('> (A->B) data from B:', data.toString());
-	});
-
-	c.on('end', function () {
-	    console.log('> (A->B) connection closed.');
-	});
-
-	c.on('error', function (err) {
-	    console.log('> (A->B) connection closed with err:', err.code);
 	    setTimeout(function () {
-	    	connectTo(ip, port);
-	    },500);
-	});
-}
-
-var tunnelSocket = null;
-
-function listen (ip, port) {
-	var server = require('net').createServer(function (socket) {
-		tunnelSocket = socket;
-
-		console.log('> (A) someone connected, it\s:', socket.remoteAddress, socket.remotePort);
-
-	    socket.write("Hello there NAT traversal man, you are connected to A!");
-	    tunnelEstablished = true;
-
-	    readStuffFromCommandLineAndSendToB();
-	});
-
-	server.listen(port, ip, function (err) {
-		if(err) return console.log(err);
-		console.log('> (A) listening on ', ip + ":" + port);
-	});
-}
-
-function readStuffFromCommandLineAndSendToB () {
-	if(!tunnelSocket) return;
-
-	rl.question('Say something to B:', function (stuff) {
-		tunnelSocket.write(stuff);
-
-		readStuffFromCommandLineAndSendToB();
+	    	sendMessageToB(address, port);
+	    }, 2000);
 	});
 }
